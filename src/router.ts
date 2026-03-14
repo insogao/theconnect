@@ -236,7 +236,7 @@ export class BridgeRouter {
     ].join('\n');
   }
 
-  private async sendTemporary(chatId: string, route: ParsedTemporaryRoute, onProgress?: import('./types.js').ProgressCallback): Promise<string> {
+  private async sendTemporary(chatId: string, route: ParsedTemporaryRoute, onProgress?: import('./types.js').ProgressCallback, images?: string[]): Promise<string> {
     const state = this.getState(chatId);
     const resolvedSlot = resolveSlotFromAlias(state, route.targetToken);
     if (!resolvedSlot) {
@@ -251,7 +251,7 @@ export class BridgeRouter {
     const monitor = this.deps.remoteMonitor;
     monitor?.suppress(target.threadId);
     try {
-      const reply = await this.deps.codexRuntime.sendToThread(target, route.message, onProgress);
+      const reply = await this.deps.codexRuntime.sendToThread(target, route.message, onProgress, images);
       return [`临时发送到 ${target.slot} (${target.workspaceName})`, '', reply].join('\n');
     } finally {
       monitor?.unsuppress(target.threadId);
@@ -316,7 +316,7 @@ export class BridgeRouter {
 
     const tempRoute = parseTemporaryRoute(trimmed);
     if (tempRoute) {
-      return this.sendTemporary(chatId, tempRoute, onProgress);
+      return this.sendTemporary(chatId, tempRoute, onProgress, images);
     }
 
     return this.sendDefault(chatId, trimmed, onProgress, images);
