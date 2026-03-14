@@ -42,7 +42,7 @@ export interface TargetProvider {
 export type ProgressCallback = (chars: number, actualTokens?: number) => void;
 
 export interface CodexRuntime {
-  sendToThread(target: Target, message: string, onProgress?: ProgressCallback): Promise<string>;
+  sendToThread(target: Target, message: string, onProgress?: ProgressCallback, images?: string[]): Promise<string>;
   createThread(workingDirectory?: string): Promise<Target>;
 }
 

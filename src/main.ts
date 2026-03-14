@@ -27,7 +27,7 @@ async function main(): Promise<void> {
   startWebUi(targetProvider);
   const { sendToChat } = await startFeishuBridge(
     config,
-    (chatId, text, onProgress) => router.handleText(chatId, text, onProgress),
+    (chatId, text, onProgress, images) => router.handleText(chatId, text, onProgress, images),
   );
 
   // Wire the Feishu send function into the monitor so it can push notifications

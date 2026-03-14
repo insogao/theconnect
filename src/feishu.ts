@@ -106,7 +106,7 @@ async function downloadMessageMedia(
 
 export async function startFeishuBridge(
   config: BridgeConfig,
-  handleText: (chatId: string, text: string, onProgress?: (chars: number, actualTokens?: number) => void) => Promise<string>,
+  handleText: (chatId: string, text: string, onProgress?: (chars: number, actualTokens?: number) => void, images?: string[]) => Promise<string>,
 ): Promise<{ sendToChat: (chatId: string, text: string) => Promise<void> }> {
   const client = new lark.Client({
     appId: config.feishuAppId,
@@ -154,16 +154,21 @@ export async function startFeishuBridge(
           data: { reaction_type: { emoji_type: 'Typing' } },
         }).catch(() => undefined);
 
-        // Download media files for image/file messages; build descriptor text
+        // Download media files for image/file messages; pass as local_image to Codex SDK
         let mediaPaths: Array<{ tmpPath: string; displayName: string }> = [];
         let text: string;
+        let mediaImages: string[] = [];
         if (message.message_type === 'image' || message.message_type === 'file') {
           mediaPaths = await downloadMessageMedia(client, message.message_type, message.content ?? '').catch(() => []);
           if (mediaPaths.length > 0) {
-            const list = mediaPaths.map(m => `  - ${m.displayName}: ${m.tmpPath}`).join('\n');
-            text = `[收到${message.message_type === 'file' ? '文件' : '图片'}，已下载到本地供 Codex 使用：\n${list}\n]`;
+            mediaImages = mediaPaths.map(m => m.tmpPath);
+            // Brief hint text so the router doesn't see an empty message;
+            // the actual image content is delivered via the SDK local_image input.
+            text = message.message_type === 'file'
+              ? `用户发送了文件：${mediaPaths.map(m => m.displayName).join('、')}`
+              : '用户发送了一张图片，请分析';
           } else {
-            text = message.message_type === 'file' ? '(文件)' : '(图片)';
+            text = message.message_type === 'file' ? '(文件下载失败)' : '(图片下载失败)';
           }
         } else {
           text = extractFeishuText(message.message_type, message.content ?? '');
@@ -194,7 +199,7 @@ export async function startFeishuBridge(
           const reply = await handleText(chatId, text, (chars, actualTokens) => {
             outputChars = chars;
             if (actualTokens) finalTokens = actualTokens;
-          });
+          }, mediaImages.length > 0 ? mediaImages : undefined);
           clearInterval(statusTimer);
           // Append real token count if we got it from the SDK
           const tokenSuffix = finalTokens > 0 ? `\n\n📊 本轮消耗：${finalTokens} tokens（输出+思考）` : '';

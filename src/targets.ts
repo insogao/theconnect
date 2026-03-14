@@ -121,7 +121,11 @@ export function listTargetsFromDb(dbPath = CODEX_DB_PATH, sessionIndexPath = SES
       workspaceName: basename(row.cwd),
       workingDirectory: row.cwd,
       createdAt: row.created_at,
-      updatedAt: Math.floor(Date.parse(sessionIndex.get(row.id)?.updated_at ?? '') / 1000) || row.updated_at,
+      // Use the later of: session_index.jsonl entry (may be stale/creation time) vs DB updated_at
+      updatedAt: Math.max(
+        Math.floor(Date.parse(sessionIndex.get(row.id)?.updated_at ?? '') / 1000) || 0,
+        row.updated_at,
+      ),
     };
   });
 }

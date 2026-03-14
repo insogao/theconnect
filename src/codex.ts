@@ -28,7 +28,7 @@ export class LocalCodexRuntime implements CodexRuntime {
     return this.codex;
   }
 
-  async sendToThread(target: Target, message: string, onProgress?: ProgressCallback): Promise<string> {
+  async sendToThread(target: Target, message: string, onProgress?: ProgressCallback, images?: string[]): Promise<string> {
     const codex = await this.getCodex();
     const thread = codex.resumeThread(target.threadId, {
       workingDirectory: target.workingDirectory,
@@ -36,9 +36,18 @@ export class LocalCodexRuntime implements CodexRuntime {
       skipGitRepoCheck: true,
     });
 
+    // Build multimodal input when local image paths are provided
+    type UserInput = { type: 'text'; text: string } | { type: 'local_image'; path: string };
+    const input: string | UserInput[] = images?.length
+      ? [
+          { type: 'text' as const, text: message },
+          ...images.map((p) => ({ type: 'local_image' as const, path: p })),
+        ]
+      : message;
+
     const textParts: string[] = [];
     let accChars = 0;
-    const { events } = await thread.runStreamed(message);
+    const { events } = await thread.runStreamed(input);
 
     for await (const event of events) {
       if (event.type === 'item.completed') {
@@ -91,7 +100,7 @@ export class MockCodexRuntime implements CodexRuntime {
 
   constructor(private readonly replyPrefix = 'MOCK_REPLY') {}
 
-  async sendToThread(target: Target, message: string, _onProgress?: ProgressCallback): Promise<string> {
+  async sendToThread(target: Target, message: string, _onProgress?: ProgressCallback, _images?: string[]): Promise<string> {
     this.calls.push({ kind: 'send', target, message });
     return `${this.replyPrefix}:${target.slot}:${message}`;
   }

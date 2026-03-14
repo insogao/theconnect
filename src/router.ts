@@ -258,7 +258,7 @@ export class BridgeRouter {
     }
   }
 
-  private async sendDefault(chatId: string, message: string, onProgress?: import('./types.js').ProgressCallback): Promise<string> {
+  private async sendDefault(chatId: string, message: string, onProgress?: import('./types.js').ProgressCallback, images?: string[]): Promise<string> {
     const state = this.getState(chatId);
     if (!state.currentTargetSlot) {
       const recommended4test = findRecommended4testTarget(this.listTargets());
@@ -280,13 +280,13 @@ export class BridgeRouter {
     const monitor = this.deps.remoteMonitor;
     monitor?.suppress(target.threadId);
     try {
-      return await this.deps.codexRuntime.sendToThread(target, message, onProgress);
+      return await this.deps.codexRuntime.sendToThread(target, message, onProgress, images);
     } finally {
       monitor?.unsuppress(target.threadId);
     }
   }
 
-  async handleText(chatId: string, text: string, onProgress?: import('./types.js').ProgressCallback): Promise<string> {
+  async handleText(chatId: string, text: string, onProgress?: import('./types.js').ProgressCallback, images?: string[]): Promise<string> {
     const trimmed = text.trim();
     if (!trimmed) return '收到空消息。';
 
@@ -319,7 +319,7 @@ export class BridgeRouter {
       return this.sendTemporary(chatId, tempRoute, onProgress);
     }
 
-    return this.sendDefault(chatId, trimmed, onProgress);
+    return this.sendDefault(chatId, trimmed, onProgress, images);
   }
 }
 
