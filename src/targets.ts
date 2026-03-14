@@ -62,6 +62,19 @@ function pickTitle(row: ThreadRow, indexEntry?: SessionIndexEntry): string {
   return '(新线程)';
 }
 
+/** Encode a per-workspace thread position into a 2-char slot suffix.
+ * Positions 0-98 → '01'-'99' (numeric)
+ * Positions 99+   → 'a0'-'z9' (letter + digit, 260 extra slots)
+ */
+function encodePosition(pos: number): string {
+  if (pos < 99) return String(pos + 1).padStart(2, '0');
+  const offset = pos - 99;
+  const letter = 'abcdefghijklmnopqrstuvwxyz'[Math.floor(offset / 10)];
+  const digit = offset % 10;
+  if (!letter) return String(pos + 1); // extreme overflow — just use raw number
+  return `${letter}${digit}`;
+}
+
 export function listTargetsFromDb(dbPath = CODEX_DB_PATH, sessionIndexPath = SESSION_INDEX_PATH): Target[] {
   if (!existsSync(dbPath)) {
     throw new Error(`未找到 Codex 数据库：${dbPath}`);
@@ -89,15 +102,28 @@ export function listTargetsFromDb(dbPath = CODEX_DB_PATH, sessionIndexPath = SES
 
   const visibleRows = rows.filter((row) => existsSync(row.cwd) && existsSync(row.rollout_path));
 
-  return visibleRows.map((row, index) => ({
-    slot: String(101 + index),
-    threadId: row.id,
-    title: pickTitle(row, sessionIndex.get(row.id)),
-    workspaceName: basename(row.cwd),
-    workingDirectory: row.cwd,
-    createdAt: row.created_at,
-    updatedAt: Math.floor(Date.parse(sessionIndex.get(row.id)?.updated_at ?? '') / 1000) || row.updated_at,
-  }));
+  // Group by workspace directory; sort workspaces alphabetically for stable ws-index assignment
+  const wsDirs = [...new Set(visibleRows.map((r) => r.cwd))].sort();
+  const wsIndexOf = new Map(wsDirs.map((dir, i) => [dir, i + 1]));
+
+  // Track per-workspace thread count to assign position index
+  const wsPosCounter = new Map<string, number>();
+
+  return visibleRows.map((row) => {
+    const wsIdx = wsIndexOf.get(row.cwd) ?? 1;
+    const pos = wsPosCounter.get(row.cwd) ?? 0;
+    wsPosCounter.set(row.cwd, pos + 1);
+    const slot = `${wsIdx}${encodePosition(pos)}`;
+    return {
+      slot,
+      threadId: row.id,
+      title: pickTitle(row, sessionIndex.get(row.id)),
+      workspaceName: basename(row.cwd),
+      workingDirectory: row.cwd,
+      createdAt: row.created_at,
+      updatedAt: Math.floor(Date.parse(sessionIndex.get(row.id)?.updated_at ?? '') / 1000) || row.updated_at,
+    };
+  });
 }
 
 export class CodexTargetProvider implements TargetProvider {

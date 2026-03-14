@@ -27,7 +27,7 @@ export function extractFeishuText(messageType: string, contentJson: string): str
     }
   } else if (messageType === 'post') {
     try {
-      type PostBlock = { tag: string; text?: string };
+      type PostBlock = { tag: string; text?: string; user_name?: string };
       type PostLang = { content?: PostBlock[][] };
       const content = JSON.parse(contentJson) as Record<string, PostLang>;
       const lang = content.zh_cn ?? content.en_us ?? Object.values(content)[0];
@@ -35,12 +35,19 @@ export function extractFeishuText(messageType: string, contentJson: string): str
       for (const line of lang?.content ?? []) {
         for (const block of line) {
           if (block.tag === 'text' && block.text) pieces.push(block.text);
+          // 'a' = link element — grab link text too
+          else if (block.tag === 'a' && block.text) pieces.push(block.text);
         }
       }
       raw = pieces.join(' ').trim();
     } catch {
       raw = '';
     }
+  } else if (messageType === 'image' || messageType === 'file' || messageType === 'sticker') {
+    // For standalone image/file messages, return a placeholder so the handler processes them.
+    // The text extracted here will only be used if there's no #slot prefix — in that case
+    // the bot will reply with a helpful message rather than silently ignoring.
+    raw = '(图片)';
   }
 
   return raw.replace(/^(@\S+\s*)+/, '').trim();
@@ -90,18 +97,18 @@ export async function startFeishuBridge(
         if (processedIds.has(message.message_id)) return;
         processedIds.set(message.message_id, Date.now());
 
+        // Send reaction immediately so user always gets feedback that message was received
+        await client.im.messageReaction.create({
+          path: { message_id: message.message_id },
+          data: { reaction_type: { emoji_type: 'Typing' } },
+        }).catch(() => undefined);
+
         const text = extractFeishuText(message.message_type, message.content ?? '');
         if (!text) return;
 
         const chatId = message.chat_type === 'p2p'
           ? (data.sender?.sender_id?.open_id ?? message.chat_id)
           : message.chat_id;
-
-        // Immediate typing indicator as an emoji reaction (Typing is a valid Feishu emoji code)
-        await client.im.messageReaction.create({
-          path: { message_id: message.message_id },
-          data: { reaction_type: { emoji_type: 'Typing' } },
-        }).catch(() => undefined);
 
         const startTime = Date.now();
         let outputChars = 0;
@@ -115,7 +122,7 @@ export async function startFeishuBridge(
           const mins = Math.floor(elapsedSec / 60);
           const secs = elapsedSec % 60;
           const elapsed = mins > 0 ? `${mins}分${secs}秒` : `${secs}秒`;
-          const tokenInfo = outputChars > 0 ? `已收到 ${outputChars} 字` : '等待回复中';
+          const tokenInfo = outputChars > 0 ? `已收到 ${outputChars} 字` : 'Codex 思考中...';
           sendReply(message.message_id, `⏳ 正在运行中... ${tokenInfo}，已用 ${elapsed}`).catch(() => undefined);
         }, intervalMs);
 
