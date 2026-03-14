@@ -48,7 +48,7 @@ export function extractFeishuText(messageType: string, contentJson: string): str
 
 export async function startFeishuBridge(
   config: BridgeConfig,
-  handleText: (chatId: string, text: string) => Promise<string>,
+  handleText: (chatId: string, text: string, onProgress?: (chars: number) => void) => Promise<string>,
 ): Promise<void> {
   const client = new lark.Client({
     appId: config.feishuAppId,
@@ -97,26 +97,29 @@ export async function startFeishuBridge(
           ? (data.sender?.sender_id?.open_id ?? message.chat_id)
           : message.chat_id;
 
-        // Immediate typing indicator as an emoji reaction (not a text reply)
+        // Immediate typing indicator as an emoji reaction (Typing is a valid Feishu emoji code)
         await client.im.messageReaction.create({
           path: { message_id: message.message_id },
-          data: { reaction_type: { emoji_type: 'KEYBOARD' } },
+          data: { reaction_type: { emoji_type: 'Typing' } },
         }).catch(() => undefined);
 
         const startTime = Date.now();
+        let outputChars = 0;
         // Re-read interval from disk on each message so web UI changes take effect immediately
         const intervalMs = ((loadConfig()?.statusIntervalSecs) ?? config.statusIntervalSecs ?? 180) * 1000;
-        // Send a "still running" status reply at configured interval
+        // Send a "still running" status reply at configured interval — shows live token estimate
         const statusTimer = setInterval(() => {
+          const tokenEst = Math.ceil(outputChars / 3.5);
           const elapsedSec = Math.round((Date.now() - startTime) / 1000);
           const mins = Math.floor(elapsedSec / 60);
           const secs = elapsedSec % 60;
           const elapsed = mins > 0 ? `${mins}分${secs}秒` : `${secs}秒`;
-          sendReply(message.message_id, `⏳ 正在运行中... 已用 ${elapsed}`).catch(() => undefined);
+          const tokenInfo = outputChars > 0 ? `已收到约 ${tokenEst} tokens` : '等待回复中';
+          sendReply(message.message_id, `⏳ 正在运行中... ${tokenInfo}，已用 ${elapsed}`).catch(() => undefined);
         }, intervalMs);
 
         try {
-          const reply = await handleText(chatId, text);
+          const reply = await handleText(chatId, text, (chars) => { outputChars = chars; });
           clearInterval(statusTimer);
           await sendReply(message.message_id, reply);
         } catch (err) {

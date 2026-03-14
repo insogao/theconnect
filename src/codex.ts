@@ -1,4 +1,4 @@
-import type { CodexRuntime, Target } from './types.js';
+import type { CodexRuntime, ProgressCallback, Target } from './types.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyCodex = any;
@@ -28,7 +28,7 @@ export class LocalCodexRuntime implements CodexRuntime {
     return this.codex;
   }
 
-  async sendToThread(target: Target, message: string): Promise<string> {
+  async sendToThread(target: Target, message: string, onProgress?: ProgressCallback): Promise<string> {
     const codex = await this.getCodex();
     const thread = codex.resumeThread(target.threadId, {
       workingDirectory: target.workingDirectory,
@@ -37,6 +37,7 @@ export class LocalCodexRuntime implements CodexRuntime {
     });
 
     const textParts: string[] = [];
+    let accChars = 0;
     const { events } = await thread.runStreamed(message);
 
     for await (const event of events) {
@@ -44,6 +45,8 @@ export class LocalCodexRuntime implements CodexRuntime {
         const item = event.item as Record<string, unknown>;
         if (item.type === 'agent_message' && typeof item.text === 'string' && item.text) {
           textParts.push(item.text);
+          accChars += item.text.length;
+          onProgress?.(accChars);
         }
       } else if (event.type === 'turn.failed') {
         const msg = (event as Record<string, unknown>).message;
@@ -81,7 +84,7 @@ export class MockCodexRuntime implements CodexRuntime {
 
   constructor(private readonly replyPrefix = 'MOCK_REPLY') {}
 
-  async sendToThread(target: Target, message: string): Promise<string> {
+  async sendToThread(target: Target, message: string, _onProgress?: ProgressCallback): Promise<string> {
     this.calls.push({ kind: 'send', target, message });
     return `${this.replyPrefix}:${target.slot}:${message}`;
   }

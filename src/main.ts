@@ -20,7 +20,7 @@ async function main(): Promise<void> {
   console.log('╚══════════════════════════════════════════════╝');
 
   startWebUi(targetProvider);
-  await startFeishuBridge(config, (chatId, text) => router.handleText(chatId, text));
+  await startFeishuBridge(config, (chatId, text, onProgress) => router.handleText(chatId, text, onProgress));
 }
 
 main().catch((error) => {

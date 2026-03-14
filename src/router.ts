@@ -210,7 +210,7 @@ export class BridgeRouter {
     ].join('\n');
   }
 
-  private async sendTemporary(chatId: string, route: ParsedTemporaryRoute): Promise<string> {
+  private async sendTemporary(chatId: string, route: ParsedTemporaryRoute, onProgress?: import('./types.js').ProgressCallback): Promise<string> {
     const state = this.getState(chatId);
     const resolvedSlot = resolveSlotFromAlias(state, route.targetToken);
     if (!resolvedSlot) {
@@ -222,11 +222,11 @@ export class BridgeRouter {
       return `找不到目标：${route.targetToken}\n请先 /list 查看可用目标。`;
     }
 
-    const reply = await this.deps.codexRuntime.sendToThread(target, route.message);
+    const reply = await this.deps.codexRuntime.sendToThread(target, route.message, onProgress);
     return [`临时发送到 ${target.slot} (${target.workspaceName})`, '', reply].join('\n');
   }
 
-  private async sendDefault(chatId: string, message: string): Promise<string> {
+  private async sendDefault(chatId: string, message: string, onProgress?: import('./types.js').ProgressCallback): Promise<string> {
     const state = this.getState(chatId);
     if (!state.currentTargetSlot) {
       const recommended4test = findRecommended4testTarget(this.listTargets());
@@ -245,10 +245,10 @@ export class BridgeRouter {
       return '当前默认目标已失效，请重新 /list 并 /go。';
     }
 
-    return this.deps.codexRuntime.sendToThread(target, message);
+    return this.deps.codexRuntime.sendToThread(target, message, onProgress);
   }
 
-  async handleText(chatId: string, text: string): Promise<string> {
+  async handleText(chatId: string, text: string, onProgress?: import('./types.js').ProgressCallback): Promise<string> {
     const trimmed = text.trim();
     if (!trimmed) return '收到空消息。';
 
@@ -275,10 +275,10 @@ export class BridgeRouter {
 
     const tempRoute = parseTemporaryRoute(trimmed);
     if (tempRoute) {
-      return this.sendTemporary(chatId, tempRoute);
+      return this.sendTemporary(chatId, tempRoute, onProgress);
     }
 
-    return this.sendDefault(chatId, trimmed);
+    return this.sendDefault(chatId, trimmed, onProgress);
   }
 }
 
