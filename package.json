@@ -1,0 +1,26 @@
+{
+  "name": "codex-feishu-bridge",
+  "version": "2.0.0",
+  "description": "Feishu bridge for local Codex threads with slash-command workflow",
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "restart": "pkill -f 'node dist/main' 2>/dev/null; sleep 1; npm run build && node dist/main.js",
+    "test": "npm run build && node tests/unit-cases.mjs && node tests/serial-flow.mjs",
+    "test:unit": "npm run build && node tests/unit-cases.mjs",
+    "test:serial": "npm run build && node tests/serial-flow.mjs"
+  },
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.28.0",
+    "@openai/codex-sdk": "^0.114.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "typescript": "^5.4.0"
+  },
+  "engines": {
+    "node": ">=25"
+  }
+}
