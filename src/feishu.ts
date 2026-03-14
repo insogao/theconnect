@@ -61,6 +61,16 @@ export async function startFeishuBridge(
     loggerLevel: lark.LoggerLevel.warn,
   });
 
+  // Dedup: track recently processed message IDs (last 5 minutes)
+  const processedIds = new Map<string, number>();
+  const DEDUP_TTL_MS = 5 * 60 * 1000;
+  const cleanupDedup = (): void => {
+    const cutoff = Date.now() - DEDUP_TTL_MS;
+    for (const [id, ts] of processedIds) {
+      if (ts < cutoff) processedIds.delete(id);
+    }
+  };
+
   const sendReply = async (messageId: string, text: string): Promise<void> => {
     await client.im.message.reply({
       path: { message_id: messageId },
@@ -73,6 +83,11 @@ export async function startFeishuBridge(
       'im.message.receive_v1': async (data: FeishuMessageEvent) => {
         const message = data.message;
         if (!message) return;
+
+        // Dedup: skip if already processed
+        cleanupDedup();
+        if (processedIds.has(message.message_id)) return;
+        processedIds.set(message.message_id, Date.now());
 
         const text = extractFeishuText(message.message_type, message.content ?? '');
         if (!text) return;
