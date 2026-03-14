@@ -1,52 +1,61 @@
-import { spawn } from 'node:child_process';
 import type { CodexRuntime, Target } from './types.js';
 
-/** Strip ANSI escape sequences from CLI output */
-function stripAnsi(str: string): string {
-  return str
-    .replace(/\x1B\[[0-9;]*[A-Za-z]/g, '')
-    .replace(/\x1B\][^\x07]*\x07/g, '')
-    .replace(/\x1B[()][AB012]/g, '');
-}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyCodex = any;
 
 /**
- * Invokes the local Codex CLI (`npx codex exec resume`) which uses the
- * already-authenticated ~/.codex/auth.json — no API key required.
+ * Uses @openai/codex-sdk directly. No API key required —
+ * the SDK automatically picks up ~/.codex/auth.json (ChatGPT login).
+ *
+ * skipGitRepoCheck: true is required when calling from outside the
+ * target workspace (which is always the case here).
+ *
+ * Event flow:
+ *   thread.started    → confirms thread ID
+ *   item.completed    → item.type === 'agent_message' → item.text  ← AI reply
+ *   turn.completed    → all done
+ *   turn.failed/error → throw
  */
 export class LocalCodexRuntime implements CodexRuntime {
+  private codex: AnyCodex | null = null;
+
+  private async getCodex(): Promise<AnyCodex> {
+    if (this.codex) return this.codex;
+    const mod = await import('@openai/codex-sdk') as AnyCodex;
+    const CodexClass = mod.Codex ?? mod.default?.Codex ?? mod.default;
+    // No apiKey → SDK reads ~/.codex/auth.json automatically
+    this.codex = new CodexClass({});
+    return this.codex;
+  }
+
   async sendToThread(target: Target, message: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const proc = spawn(
-        'npx',
-        ['codex', 'exec', 'resume', target.threadId, message, '--full-auto'],
-        {
-          cwd: target.workingDirectory,
-          env: { ...process.env },
-        },
-      );
-
-      const outChunks: string[] = [];
-      const errChunks: string[] = [];
-
-      proc.stdout.on('data', (data: Buffer) => outChunks.push(data.toString()));
-      proc.stderr.on('data', (data: Buffer) => errChunks.push(data.toString()));
-
-      proc.on('close', (code: number | null) => {
-        const reply = stripAnsi(outChunks.join('')).trim();
-        if (reply) {
-          resolve(reply);
-        } else if (code !== 0) {
-          const errText = stripAnsi(errChunks.join('')).slice(0, 300);
-          reject(new Error(`codex 退出码 ${code}${errText ? ': ' + errText : ''}`));
-        } else {
-          resolve('Codex 已处理，但没有返回可显示文本。');
-        }
-      });
-
-      proc.on('error', (err: Error) => {
-        reject(new Error(`无法启动 codex CLI: ${err.message}`));
-      });
+    const codex = await this.getCodex();
+    const thread = codex.resumeThread(target.threadId, {
+      workingDirectory: target.workingDirectory,
+      approvalPolicy: 'on-request',
+      skipGitRepoCheck: true,
     });
+
+    const textParts: string[] = [];
+    const { events } = await thread.runStreamed(message);
+
+    for await (const event of events) {
+      if (event.type === 'item.completed') {
+        const item = event.item as Record<string, unknown>;
+        if (item.type === 'agent_message' && typeof item.text === 'string' && item.text) {
+          textParts.push(item.text);
+        }
+      } else if (event.type === 'turn.failed') {
+        const msg = (event as Record<string, unknown>).message;
+        throw new Error(`Codex turn failed: ${typeof msg === 'string' ? msg : 'unknown'}`);
+      } else if (event.type === 'error') {
+        const msg = (event as Record<string, unknown>).message;
+        throw new Error(`Codex error: ${typeof msg === 'string' ? msg : 'unknown'}`);
+      }
+    }
+
+    const reply = textParts.join('').trim();
+    return reply || '(Codex 没有返回文字回复)';
   }
 
   async createThread(workingDirectory?: string): Promise<Target> {
