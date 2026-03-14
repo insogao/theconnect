@@ -61,6 +61,13 @@ export async function startFeishuBridge(
     loggerLevel: lark.LoggerLevel.warn,
   });
 
+  const sendReply = async (messageId: string, text: string): Promise<void> => {
+    await client.im.message.reply({
+      path: { message_id: messageId },
+      data: { msg_type: 'text', content: JSON.stringify({ text }) },
+    });
+  };
+
   wsClient.start({
     eventDispatcher: new lark.EventDispatcher({}).register({
       'im.message.receive_v1': async (data: FeishuMessageEvent) => {
@@ -74,14 +81,28 @@ export async function startFeishuBridge(
           ? (data.sender?.sender_id?.open_id ?? message.chat_id)
           : message.chat_id;
 
-        const reply = await handleText(chatId, text);
-        await client.im.message.reply({
-          path: { message_id: message.message_id },
-          data: {
-            msg_type: 'text',
-            content: JSON.stringify({ text: reply }),
-          },
-        });
+        // Immediate typing indicator
+        await sendReply(message.message_id, '⌨️').catch(() => undefined);
+
+        const startTime = Date.now();
+        // Send a "still running" status every 3 minutes
+        const statusTimer = setInterval(() => {
+          const elapsedSec = Math.round((Date.now() - startTime) / 1000);
+          const mins = Math.floor(elapsedSec / 60);
+          const secs = elapsedSec % 60;
+          const elapsed = mins > 0 ? `${mins}分${secs}秒` : `${secs}秒`;
+          sendReply(message.message_id, `⏳ 正在运行中... 已用 ${elapsed}`).catch(() => undefined);
+        }, 3 * 60 * 1000);
+
+        try {
+          const reply = await handleText(chatId, text);
+          clearInterval(statusTimer);
+          await sendReply(message.message_id, reply);
+        } catch (err) {
+          clearInterval(statusTimer);
+          const msg = err instanceof Error ? err.message : String(err);
+          await sendReply(message.message_id, `❌ 出错了：${msg}`);
+        }
       },
     }),
   });

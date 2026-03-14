@@ -1,54 +1,60 @@
+import { spawn } from 'node:child_process';
 import type { CodexRuntime, Target } from './types.js';
 
-export class OpenAICodexRuntime implements CodexRuntime {
-  constructor(private readonly apiKey?: string) {}
+/** Strip ANSI escape sequences from CLI output */
+function stripAnsi(str: string): string {
+  return str
+    .replace(/\x1B\[[0-9;]*[A-Za-z]/g, '')
+    .replace(/\x1B\][^\x07]*\x07/g, '')
+    .replace(/\x1B[()][AB012]/g, '');
+}
 
+/**
+ * Invokes the local Codex CLI (`npx codex exec resume`) which uses the
+ * already-authenticated ~/.codex/auth.json — no API key required.
+ */
+export class LocalCodexRuntime implements CodexRuntime {
   async sendToThread(target: Target, message: string): Promise<string> {
-    if (!this.apiKey) {
-      throw new Error('未配置 openaiApiKey，无法向 Codex 线程发送消息。');
-    }
+    return new Promise((resolve, reject) => {
+      const proc = spawn(
+        'npx',
+        ['codex', 'exec', 'resume', target.threadId, message, '--full-auto'],
+        {
+          cwd: target.workingDirectory,
+          env: { ...process.env },
+        },
+      );
 
-    const { Codex } = await import('@openai/codex-sdk');
-    const codex = new Codex({ apiKey: this.apiKey });
-    const thread = codex.resumeThread(target.threadId, {
-      workingDirectory: target.workingDirectory,
-      approvalPolicy: 'on-request',
+      const outChunks: string[] = [];
+      const errChunks: string[] = [];
+
+      proc.stdout.on('data', (data: Buffer) => outChunks.push(data.toString()));
+      proc.stderr.on('data', (data: Buffer) => errChunks.push(data.toString()));
+
+      proc.on('close', (code: number | null) => {
+        const reply = stripAnsi(outChunks.join('')).trim();
+        if (reply) {
+          resolve(reply);
+        } else if (code !== 0) {
+          const errText = stripAnsi(errChunks.join('')).slice(0, 300);
+          reject(new Error(`codex 退出码 ${code}${errText ? ': ' + errText : ''}`));
+        } else {
+          resolve('Codex 已处理，但没有返回可显示文本。');
+        }
+      });
+
+      proc.on('error', (err: Error) => {
+        reject(new Error(`无法启动 codex CLI: ${err.message}`));
+      });
     });
-
-    const chunks: string[] = [];
-    const stream = await thread.runStreamed(message) as unknown as AsyncIterable<Record<string, unknown>>;
-    for await (const event of stream) {
-      if (event.type === 'thread.message.delta' && typeof event.delta === 'string') {
-        chunks.push(event.delta);
-      }
-      if (event.type === 'thread.message.completed' && typeof event.text === 'string') {
-        chunks.push(event.text);
-      }
-    }
-
-    const reply = chunks.join('').trim();
-    return reply || 'Codex 已处理，但没有返回可显示文本。';
   }
 
   async createThread(workingDirectory?: string): Promise<Target> {
-    if (!this.apiKey) {
-      throw new Error('未配置 openaiApiKey，无法创建新会话。');
-    }
-
-    const { Codex } = await import('@openai/codex-sdk');
-    const codex = new Codex({ apiKey: this.apiKey });
-    const cwd = workingDirectory || process.cwd();
-    const thread = codex.startThread({
-      workingDirectory: cwd,
-      approvalPolicy: 'on-request',
-    });
-    const threadId = thread.id ?? 'pending-thread-id';
-
+    const cwd = workingDirectory ?? process.cwd();
     const now = Math.floor(Date.now() / 1000);
-
     return {
       slot: 'NEW',
-      threadId,
+      threadId: 'pending-thread-id',
       title: '(新会话)',
       workspaceName: cwd.split('/').filter(Boolean).at(-1) ?? cwd,
       workingDirectory: cwd,
@@ -57,6 +63,9 @@ export class OpenAICodexRuntime implements CodexRuntime {
     };
   }
 }
+
+/** Backward-compat alias */
+export const OpenAICodexRuntime = LocalCodexRuntime;
 
 export class MockCodexRuntime implements CodexRuntime {
   public readonly calls: Array<{ kind: 'send' | 'new'; target?: Target; message?: string; cwd?: string }> = [];

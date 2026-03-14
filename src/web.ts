@@ -75,7 +75,6 @@ export function startWebUi(targetProvider: TargetProvider, port = 7547): http.Se
         ...current,
         feishuAppId: form.get('feishuAppId') ?? '',
         feishuAppSecret: form.get('feishuAppSecret') ?? '',
-        openaiApiKey: form.get('openaiApiKey') ?? '',
         defaultWorkingDirectory: form.get('defaultWorkingDirectory') ?? '',
       };
       saveConfig(next);
@@ -111,8 +110,6 @@ export function startWebUi(targetProvider: TargetProvider, port = 7547): http.Se
             <input name="feishuAppId" value="${esc(config?.feishuAppId ?? '')}" />
             <label>Feishu App Secret</label>
             <input name="feishuAppSecret" value="${esc(config?.feishuAppSecret ?? '')}" />
-            <label>OpenAI API Key</label>
-            <input name="openaiApiKey" value="${esc(config?.openaiApiKey ?? '')}" />
             <label>默认工作目录</label>
             <input name="defaultWorkingDirectory" value="${esc(config?.defaultWorkingDirectory ?? '')}" />
             <button type="submit">保存配置</button>

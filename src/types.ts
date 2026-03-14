@@ -1,7 +1,6 @@
 export interface BridgeConfig {
   feishuAppId: string;
   feishuAppSecret: string;
-  openaiApiKey?: string;
   defaultWorkingDirectory?: string;
 }
 

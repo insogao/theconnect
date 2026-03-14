@@ -12,7 +12,7 @@ async function main(): Promise<void> {
   const router = createRouter({
     targetProvider,
     sessionStore: new JsonSessionStore(),
-    codexRuntime: new OpenAICodexRuntime(config.openaiApiKey),
+    codexRuntime: new OpenAICodexRuntime(),
   });
 
   console.log('╔══════════════════════════════════════════════╗');
