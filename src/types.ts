@@ -2,6 +2,8 @@ export interface BridgeConfig {
   feishuAppId: string;
   feishuAppSecret: string;
   defaultWorkingDirectory?: string;
+  /** Seconds between "still running" status replies. Default: 180 */
+  statusIntervalSecs?: number;
 }
 
 export interface Target {

@@ -76,6 +76,7 @@ export function startWebUi(targetProvider: TargetProvider, port = 7547): http.Se
         feishuAppId: form.get('feishuAppId') ?? '',
         feishuAppSecret: form.get('feishuAppSecret') ?? '',
         defaultWorkingDirectory: form.get('defaultWorkingDirectory') ?? '',
+        statusIntervalSecs: parseInt(form.get('statusIntervalSecs') ?? '180', 10) || 180,
       };
       saveConfig(next);
       res.writeHead(302, { Location: '/' });
@@ -112,6 +113,9 @@ export function startWebUi(targetProvider: TargetProvider, port = 7547): http.Se
             <input name="feishuAppSecret" value="${esc(config?.feishuAppSecret ?? '')}" />
             <label>默认工作目录</label>
             <input name="defaultWorkingDirectory" value="${esc(config?.defaultWorkingDirectory ?? '')}" />
+            <label>运行中进度提醒间隔（秒）</label>
+            <input name="statusIntervalSecs" type="number" min="5" max="3600" step="1" value="${config?.statusIntervalSecs ?? 180}" />
+            <small style="color:#888;display:block;margin-top:-8px;margin-bottom:12px">AI 处理期间每隔多少秒发一条进度提示。保存后下一条消息即生效。</small>
             <button type="submit">保存配置</button>
           </form>
         </div>

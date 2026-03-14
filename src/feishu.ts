@@ -1,4 +1,5 @@
 import * as lark from '@larksuiteoapi/node-sdk';
+import { loadConfig } from './config.js';
 import type { BridgeConfig } from './types.js';
 
 export interface FeishuMessageEvent {
@@ -96,18 +97,23 @@ export async function startFeishuBridge(
           ? (data.sender?.sender_id?.open_id ?? message.chat_id)
           : message.chat_id;
 
-        // Immediate typing indicator
-        await sendReply(message.message_id, '⌨️').catch(() => undefined);
+        // Immediate typing indicator as an emoji reaction (not a text reply)
+        await client.im.messageReaction.create({
+          path: { message_id: message.message_id },
+          data: { reaction_type: { emoji_type: 'KEYBOARD' } },
+        }).catch(() => undefined);
 
         const startTime = Date.now();
-        // Send a "still running" status every 3 minutes
+        // Re-read interval from disk on each message so web UI changes take effect immediately
+        const intervalMs = ((loadConfig()?.statusIntervalSecs) ?? config.statusIntervalSecs ?? 180) * 1000;
+        // Send a "still running" status reply at configured interval
         const statusTimer = setInterval(() => {
           const elapsedSec = Math.round((Date.now() - startTime) / 1000);
           const mins = Math.floor(elapsedSec / 60);
           const secs = elapsedSec % 60;
           const elapsed = mins > 0 ? `${mins}分${secs}秒` : `${secs}秒`;
           sendReply(message.message_id, `⏳ 正在运行中... 已用 ${elapsed}`).catch(() => undefined);
-        }, 3 * 60 * 1000);
+        }, intervalMs);
 
         try {
           const reply = await handleText(chatId, text);
