@@ -97,6 +97,31 @@ async function downloadMessageMedia(
           results.push({ tmpPath, displayName: fileName });
         }
       }
+    } else if (messageType === 'post') {
+      // Extract img blocks from all languages in the post
+      type PostBlock = { tag: string; image_key?: string };
+      type PostLang = { content?: PostBlock[][] };
+      const postContent = content as Record<string, PostLang>;
+      const lang = postContent.zh_cn ?? postContent.en_us ?? Object.values(postContent)[0];
+      let imgIndex = 0;
+      for (const line of lang?.content ?? []) {
+        for (const block of line) {
+          if (block.tag === 'img' && block.image_key) {
+            const tmpPath = path.join(os.tmpdir(), `feishu_post_img_${Date.now()}_${imgIndex++}.jpg`);
+            try {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const resp = await (client.im.image as any).get({ path: { image_key: block.image_key } });
+              const stream: unknown = (resp as Record<string, unknown>).data ?? resp;
+              if (stream instanceof Readable || (stream && typeof (stream as { pipe?: unknown }).pipe === 'function')) {
+                await pipeline(stream as Readable, fs.createWriteStream(tmpPath));
+                results.push({ tmpPath, displayName: path.basename(tmpPath) });
+              }
+            } catch (e) {
+              console.error('[feishu] Failed to download post image', block.image_key, e instanceof Error ? e.message : e);
+            }
+          }
+        }
+      }
     }
   } catch {
     // Ignore download errors; caller will fall back to placeholder text
@@ -158,21 +183,43 @@ export async function startFeishuBridge(
         let mediaPaths: Array<{ tmpPath: string; displayName: string }> = [];
         let text: string;
         let mediaImages: string[] = [];
+
+        console.log(`[feishu] recv msg_type=${message.message_type} msg_id=${message.message_id}`);
+
         if (message.message_type === 'image' || message.message_type === 'file') {
-          mediaPaths = await downloadMessageMedia(client, message.message_type, message.content ?? '').catch(() => []);
+          mediaPaths = await downloadMessageMedia(client, message.message_type, message.content ?? '').catch((e) => {
+            console.error('[feishu] downloadMessageMedia error:', e instanceof Error ? e.message : e);
+            return [];
+          });
           if (mediaPaths.length > 0) {
             mediaImages = mediaPaths.map(m => m.tmpPath);
-            // Brief hint text so the router doesn't see an empty message;
-            // the actual image content is delivered via the SDK local_image input.
             text = message.message_type === 'file'
               ? `用户发送了文件：${mediaPaths.map(m => m.displayName).join('、')}`
               : '用户发送了一张图片，请分析';
           } else {
             text = message.message_type === 'file' ? '(文件下载失败)' : '(图片下载失败)';
           }
+        } else if (message.message_type === 'post') {
+          // post = rich text: may contain text blocks AND img blocks
+          text = extractFeishuText('post', message.content ?? '');
+          const postImgs = await downloadMessageMedia(client, 'post', message.content ?? '').catch((e) => {
+            console.error('[feishu] post image download error:', e instanceof Error ? e.message : e);
+            return [];
+          });
+          if (postImgs.length > 0) {
+            mediaPaths = postImgs;
+            mediaImages = postImgs.map(p => p.tmpPath);
+            console.log(`[feishu] post has ${postImgs.length} image(s)`);
+          }
+          // If the post was image-only (no text), give a hint so Codex knows what to do
+          if (!text && mediaImages.length > 0) {
+            text = '用户发送了图文消息，请分析图片内容';
+          }
         } else {
           text = extractFeishuText(message.message_type, message.content ?? '');
         }
+
+        console.log(`[feishu] text=${JSON.stringify(text.slice(0,80))} images=${mediaImages.length}`);
         if (!text) return;
 
         const chatId = message.chat_type === 'p2p'
