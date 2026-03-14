@@ -71,6 +71,8 @@ export class BridgeRouter {
       '/rename 小高 - 给当前目标起别名',
       '/改名 小高 - 给当前目标起别名',
       '/new [path] - 在指定目录新建会话',
+      '/remote - 开启/关闭远程监控（桌面端 Codex 回复自动推送）',
+      '/远程 - 开启/关闭远程监控',
       '/help - 显示帮助',
       '/帮助 - 显示帮助',
     ];
@@ -197,6 +199,25 @@ export class BridgeRouter {
     return `已将 ${target.slot} 设置别名为 #${cleanAlias}`;
   }
 
+  private remoteText(chatId: string): string {
+    const monitor = this.deps.remoteMonitor;
+    if (!monitor) return '远程监控功能未启用（remoteMonitor 未注入）。';
+    const enabled = monitor.toggle(chatId);
+    if (enabled) {
+      return [
+        '✅ 远程监控已开启',
+        '',
+        '当 Codex 桌面端的任意 session 有新 AI 回复时，会自动推送到此对话。',
+        '格式：📩 来自 [workspace] 的 #编号 线程有新回复',
+        '然后可用 #编号 你的消息 快速回复。',
+        '',
+        '再次发送 /remote 可关闭。',
+      ].join('\n');
+    } else {
+      return '🔕 远程监控已关闭。';
+    }
+  }
+
   private async newText(chatId: string, rawPath: string): Promise<string> {
     const workingDirectory = trimCodeTicks(rawPath) || undefined;
     const target = await this.deps.codexRuntime.createThread(workingDirectory);
@@ -271,6 +292,9 @@ export class BridgeRouter {
     }
     if (trimmed === '/new' || trimmed.startsWith('/new ')) {
       return this.newText(chatId, trimmed.slice('/new'.length));
+    }
+    if (trimmed === '/remote' || trimmed === '/远程') {
+      return this.remoteText(chatId);
     }
 
     const tempRoute = parseTemporaryRoute(trimmed);

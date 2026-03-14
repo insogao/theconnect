@@ -49,7 +49,7 @@ export function extractFeishuText(messageType: string, contentJson: string): str
 export async function startFeishuBridge(
   config: BridgeConfig,
   handleText: (chatId: string, text: string, onProgress?: (chars: number) => void) => Promise<string>,
-): Promise<void> {
+): Promise<{ sendToChat: (chatId: string, text: string) => Promise<void> }> {
   const client = new lark.Client({
     appId: config.feishuAppId,
     appSecret: config.feishuAppSecret,
@@ -131,5 +131,23 @@ export async function startFeishuBridge(
     }),
   });
 
+  /**
+   * Send a proactive message to any Feishu chat (used by RemoteMonitor notifications).
+   * Detects receive_id_type from the chatId prefix:
+   *   ou_ → open_id (DM)   oc_ → chat_id (group)
+   */
+  const sendToChat = async (chatId: string, text: string): Promise<void> => {
+    const receiveIdType = chatId.startsWith('oc_') ? 'chat_id' : 'open_id';
+    await client.im.message.create({
+      params: { receive_id_type: receiveIdType },
+      data: {
+        receive_id: chatId,
+        msg_type: 'text',
+        content: JSON.stringify({ text }),
+      },
+    });
+  };
+
   console.log('[feishu] Bot connected. Waiting for messages...');
+  return { sendToChat };
 }

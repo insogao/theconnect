@@ -46,6 +46,7 @@ export interface RouterDependencies {
   targetProvider: TargetProvider;
   sessionStore: SessionStore;
   codexRuntime: CodexRuntime;
+  remoteMonitor?: import('./remote-monitor.js').RemoteMonitor;
 }
 
 export interface ParsedTemporaryRoute {
