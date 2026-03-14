@@ -9,6 +9,12 @@ interface SessionFile {
 
 const SESSION_PATH = join(BRIDGE_HOME, 'sessions.json');
 
+function normalizeFile(file?: Partial<SessionFile> | Record<string, unknown>): SessionFile {
+  return {
+    chats: { ...((file as SessionFile | undefined)?.chats ?? {}) },
+  };
+}
+
 function normalizeState(state?: ChatState): ChatState {
   return {
     currentTargetSlot: state?.currentTargetSlot,
@@ -24,7 +30,7 @@ export class JsonSessionStore implements SessionStore {
     if (!existsSync(SESSION_PATH)) {
       return { chats: {} };
     }
-    return JSON.parse(readFileSync(SESSION_PATH, 'utf8')) as SessionFile;
+    return normalizeFile(JSON.parse(readFileSync(SESSION_PATH, 'utf8')) as SessionFile);
   }
 
   private save(file: SessionFile): void {

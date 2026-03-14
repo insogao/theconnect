@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -201,6 +202,25 @@ await test('listTargetsFromDb 会过滤掉工作目录不存在的线程', async
   assert.equal(targetsFromDb[0].workspaceName, 'live-workspace');
   assert.equal(targetsFromDb[0].title, 'Desktop Live Title');
   assert.equal(targetsFromDb[0].updatedAt, Math.floor(Date.parse('2026-03-14T10:26:20.000Z') / 1000));
+});
+
+await test('旧版 {} sessions.json 不会导致 /list 崩溃', async () => {
+  const home = path.join(os.tmpdir(), `bridge-home-${Date.now()}`);
+  const bridgeHome = path.join(home, '.codex-feishu-bridge');
+  fs.mkdirSync(bridgeHome, { recursive: true });
+  fs.writeFileSync(path.join(bridgeHome, 'sessions.json'), '{}');
+
+  const output = execFileSync(process.execPath, [
+    '--input-type=module',
+    '-e',
+    "import { JsonSessionStore } from './dist/session-store.js'; const store = new JsonSessionStore(); console.log(JSON.stringify(store.getChatState('chat-old-format')));",
+  ], {
+    cwd: process.cwd(),
+    env: { ...process.env, HOME: home },
+    encoding: 'utf8',
+  }).trim();
+
+  assert.equal(output, '{"aliases":{}}');
 });
 
 console.log(`\n单元测试完成：${passed} 项通过`);
