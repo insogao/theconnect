@@ -48,7 +48,7 @@ export function extractFeishuText(messageType: string, contentJson: string): str
 
 export async function startFeishuBridge(
   config: BridgeConfig,
-  handleText: (chatId: string, text: string, onProgress?: (chars: number) => void) => Promise<string>,
+  handleText: (chatId: string, text: string, onProgress?: (chars: number, actualTokens?: number) => void) => Promise<string>,
 ): Promise<{ sendToChat: (chatId: string, text: string) => Promise<void> }> {
   const client = new lark.Client({
     appId: config.feishuAppId,
@@ -105,23 +105,29 @@ export async function startFeishuBridge(
 
         const startTime = Date.now();
         let outputChars = 0;
+        let finalTokens = 0;  // actual tokens from turn.completed (set at end of run)
         // Re-read interval from disk on each message so web UI changes take effect immediately
         const intervalMs = ((loadConfig()?.statusIntervalSecs) ?? config.statusIntervalSecs ?? 180) * 1000;
-        // Send a "still running" status reply at configured interval — shows live token estimate
+        // Send a "still running" status reply at configured interval
+        // Note: chars come in per-item (not streaming), shown as rough proxy until run ends
         const statusTimer = setInterval(() => {
-          const tokenEst = Math.ceil(outputChars / 3.5);
           const elapsedSec = Math.round((Date.now() - startTime) / 1000);
           const mins = Math.floor(elapsedSec / 60);
           const secs = elapsedSec % 60;
           const elapsed = mins > 0 ? `${mins}分${secs}秒` : `${secs}秒`;
-          const tokenInfo = outputChars > 0 ? `已收到约 ${tokenEst} tokens` : '等待回复中';
+          const tokenInfo = outputChars > 0 ? `已收到 ${outputChars} 字` : '等待回复中';
           sendReply(message.message_id, `⏳ 正在运行中... ${tokenInfo}，已用 ${elapsed}`).catch(() => undefined);
         }, intervalMs);
 
         try {
-          const reply = await handleText(chatId, text, (chars) => { outputChars = chars; });
+          const reply = await handleText(chatId, text, (chars, actualTokens) => {
+            outputChars = chars;
+            if (actualTokens) finalTokens = actualTokens;
+          });
           clearInterval(statusTimer);
-          await sendReply(message.message_id, reply);
+          // Append real token count if we got it from the SDK
+          const tokenSuffix = finalTokens > 0 ? `\n\n📊 本轮消耗：${finalTokens} tokens（输出+思考）` : '';
+          await sendReply(message.message_id, reply + tokenSuffix);
         } catch (err) {
           clearInterval(statusTimer);
           const msg = err instanceof Error ? err.message : String(err);

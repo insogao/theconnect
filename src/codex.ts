@@ -48,6 +48,13 @@ export class LocalCodexRuntime implements CodexRuntime {
           accChars += item.text.length;
           onProgress?.(accChars);
         }
+      } else if (event.type === 'turn.completed') {
+        // Capture actual token usage from the SDK — this is authoritative
+        const usage = (event as Record<string, unknown>).usage as Record<string, unknown> | undefined;
+        if (usage && onProgress) {
+          const actual = Number(usage.output_tokens ?? 0) + Number(usage.reasoning_output_tokens ?? 0);
+          if (actual > 0) onProgress(accChars, actual);
+        }
       } else if (event.type === 'turn.failed') {
         const msg = (event as Record<string, unknown>).message;
         throw new Error(`Codex turn failed: ${typeof msg === 'string' ? msg : 'unknown'}`);

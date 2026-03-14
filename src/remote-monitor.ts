@@ -28,25 +28,49 @@ interface WatchEntry {
 }
 
 /**
- * Extract agent_message texts from newly-appended JSONL bytes.
- * Handles the Codex SDK rollout format: { type: 'item.completed', item: { type: 'agent_message', text } }
+ * Extract agent messages and token counts from newly-appended JSONL bytes.
+ *
+ * The Codex desktop client writes rollout files in this format:
+ *   { type: 'event_msg',      payload: { type: 'agent_message', message: '<text>' } }
+ *   { type: 'event_msg',      payload: { type: 'token_count',   info: { last_token_usage: { output_tokens, reasoning_output_tokens } } } }
+ *   { type: 'event_msg',      payload: { type: 'task_complete' } }
+ *   { type: 'response_item',  payload: { type: 'message', role: 'assistant', content: [...] } }
+ *
+ * NOTE: This is completely different from the SDK streaming events (item.completed etc)
+ * that are used when bridging via the API.
  */
-function extractAgentTexts(raw: string): string[] {
+export interface ExtractResult {
+  texts: string[];
+  outputTokens: number;  // from token_count events (sum of last_token_usage.output_tokens + reasoning)
+}
+
+function extractFromChunk(raw: string): ExtractResult {
   const texts: string[] = [];
+  let outputTokens = 0;
+
   for (const line of raw.split('\n')) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     try {
       const obj = JSON.parse(trimmed) as Record<string, unknown>;
-      if (obj.type === 'item.completed') {
-        const item = obj.item as Record<string, unknown> | undefined;
-        if (item?.type === 'agent_message' && typeof item.text === 'string' && item.text) {
-          texts.push(item.text);
+      if (obj.type !== 'event_msg') continue;
+
+      const payload = obj.payload as Record<string, unknown> | undefined;
+      if (!payload) continue;
+
+      if (payload.type === 'agent_message' && typeof payload.message === 'string' && payload.message) {
+        texts.push(payload.message);
+      } else if (payload.type === 'token_count') {
+        const info = payload.info as Record<string, unknown> | undefined;
+        const last = info?.last_token_usage as Record<string, unknown> | undefined;
+        if (last) {
+          outputTokens += Number(last.output_tokens ?? 0) + Number(last.reasoning_output_tokens ?? 0);
         }
       }
     } catch { /* skip malformed lines */ }
   }
-  return texts;
+
+  return { texts, outputTokens };
 }
 
 export class RemoteMonitor {
@@ -153,7 +177,7 @@ export class RemoteMonitor {
         fs.closeSync(fd);
         watcher.lastOffset = stat.size;
 
-        const texts = extractAgentTexts(chunk.toString('utf-8'));
+        const { texts, outputTokens } = extractFromChunk(chunk.toString('utf-8'));
         if (texts.length === 0) continue;
 
         const combined = texts.join('\n').trim();
@@ -163,9 +187,10 @@ export class RemoteMonitor {
 
         // Preview: first 200 chars
         const preview = combined.length > 200 ? `${combined.slice(0, 197)}…` : combined;
+        const tokenNote = outputTokens > 0 ? `（本轮 ${outputTokens} tokens）` : '';
 
         const notification = [
-          `📩 来自 [${ws}] 的 #${slot} 线程有新回复：`,
+          `📩 来自 [${ws}] 的 #${slot} 线程有新回复${tokenNote}：`,
           '',
           preview,
           '',

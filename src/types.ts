@@ -34,8 +34,12 @@ export interface TargetProvider {
   findBySlot(slot: string): Target | undefined;
 }
 
-/** Called with cumulative output character count as the AI generates text. */
-export type ProgressCallback = (outputChars: number) => void;
+/**
+ * Called with progress info as AI generates:
+ * - chars: cumulative output characters received so far
+ * - actualTokens: set only once at turn end with real SDK usage (output + reasoning tokens)
+ */
+export type ProgressCallback = (chars: number, actualTokens?: number) => void;
 
 export interface CodexRuntime {
   sendToThread(target: Target, message: string, onProgress?: ProgressCallback): Promise<string>;
