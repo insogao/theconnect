@@ -151,7 +151,7 @@ async function downloadMessageMedia(
 export async function startFeishuBridge(
   config: BridgeConfig,
   handleText: (chatId: string, text: string, onProgress?: (chars: number, actualTokens?: number) => void, images?: string[]) => Promise<string>,
-): Promise<{ sendToChat: (chatId: string, text: string) => Promise<void> }> {
+): Promise<{ sendToChat: (chatId: string, text: string, imagePaths?: string[], filePaths?: Array<{ path: string; name: string }>) => Promise<void> }> {
   const client = new lark.Client({
     appId: config.feishuAppId,
     appSecret: config.feishuAppSecret,
@@ -290,7 +290,7 @@ export async function startFeishuBridge(
    * If imagePaths are provided, each local file is uploaded to Feishu and sent
    * as an image message before the text message.
    */
-  const sendToChat = async (chatId: string, text: string, imagePaths?: string[]): Promise<void> => {
+  const sendToChat = async (chatId: string, text: string, imagePaths?: string[], filePaths?: Array<{ path: string; name: string }>): Promise<void> => {
     const receiveIdType = chatId.startsWith('oc_') ? 'chat_id' : 'open_id';
 
     // Upload and send each local image
@@ -321,6 +321,39 @@ export async function startFeishuBridge(
           console.log('[feishu] sendToChat: sent image', path.basename(imgPath), 'as', imageKey);
         } catch (err) {
           console.error('[feishu] sendToChat image upload error:', err instanceof Error ? err.message : err);
+        }
+      }
+    }
+
+    // Upload and send each local file
+    if (filePaths?.length) {
+      for (const { path: filePath, name: fileName } of filePaths) {
+        try {
+          if (!fs.existsSync(filePath)) continue;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const uploadResp = await (client.im.file as any).create({
+            data: {
+              file_type: 'stream',
+              file_name: fileName,
+              file: fs.createReadStream(filePath),
+            },
+          });
+          const fileKey = uploadResp?.data?.file_key as string | undefined;
+          if (!fileKey) {
+            console.warn('[feishu] sendToChat: file upload returned no file_key for', filePath);
+            continue;
+          }
+          await client.im.message.create({
+            params: { receive_id_type: receiveIdType },
+            data: {
+              receive_id: chatId,
+              msg_type: 'file',
+              content: JSON.stringify({ file_key: fileKey }),
+            },
+          });
+          console.log('[feishu] sendToChat: sent file', fileName, 'as', fileKey);
+        } catch (err) {
+          console.error('[feishu] sendToChat file upload error:', err instanceof Error ? err.message : err);
         }
       }
     }

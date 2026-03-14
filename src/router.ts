@@ -254,7 +254,8 @@ export class BridgeRouter {
       const reply = await this.deps.codexRuntime.sendToThread(target, route.message, onProgress, images);
       return [`临时发送到 ${target.slot} (${target.workspaceName})`, '', reply].join('\n');
     } finally {
-      monitor?.unsuppress(target.threadId);
+      // Delay unsuppression: Codex may write task_complete to JSONL after the SDK resolves
+      setTimeout(() => monitor?.unsuppress(target.threadId), 10_000);
     }
   }
 
@@ -282,7 +283,8 @@ export class BridgeRouter {
     try {
       return await this.deps.codexRuntime.sendToThread(target, message, onProgress, images);
     } finally {
-      monitor?.unsuppress(target.threadId);
+      // Delay unsuppression: Codex may write task_complete to JSONL after the SDK resolves
+      setTimeout(() => monitor?.unsuppress(target.threadId), 10_000);
     }
   }
 

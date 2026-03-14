@@ -96,7 +96,7 @@ export function listTargetsFromDb(dbPath = CODEX_DB_PATH, sessionIndexPath = SES
     FROM threads t
     LEFT JOIN stage1_outputs s ON s.thread_id = t.id
     WHERE COALESCE(t.archived, 0) = 0
-    ORDER BY t.cwd ASC, t.updated_at DESC, t.id ASC
+    ORDER BY t.cwd ASC, t.created_at ASC, t.id ASC
   `).all() as unknown as ThreadRow[];
   db.close();
 

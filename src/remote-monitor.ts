@@ -21,12 +21,14 @@ import type { Target } from './types.js';
 
 /** Regex to detect markdown image references: ![alt](localpath) */
 const LOCAL_IMG_RE = /!\[[^\]]*\]\((\/?(?:\/[^)]+|[A-Za-z]:[^)]+))\)/g;
+/** Regex to detect markdown file references: [name](localpath) — must NOT be preceded by ! */
+const LOCAL_FILE_RE = /(?<!!)\[([^\]]+)\]\(((?:\/|\w:\\)[^)\s]+)\)/g;
 
 const CODEX_DB_PATH = path.join(os.homedir(), '.codex', 'state_5.sqlite');
 const POLL_INTERVAL_MS = 2500;
 const REFRESH_TARGETS_EVERY_MS = 30_000;
 
-type SendFn = (chatId: string, text: string, imagePaths?: string[]) => Promise<void>;
+type SendFn = (chatId: string, text: string, imagePaths?: string[], filePaths?: Array<{ path: string; name: string }>) => Promise<void>;
 type GetTargets = () => Target[];
 
 type ChatMode = 'final' | 'stream';
@@ -211,6 +213,18 @@ export class RemoteMonitor {
       }
     }
 
+    // Extract local file paths from markdown [name](path) syntax
+    const filePaths: Array<{ path: string; name: string }> = [];
+    LOCAL_FILE_RE.lastIndex = 0;
+    for (const m of [...cleanText.matchAll(LOCAL_FILE_RE)]) {
+      const fileName = m[1];
+      const filePath = m[2];
+      if (fs.existsSync(filePath)) {
+        filePaths.push({ path: filePath, name: fileName });
+        cleanText = cleanText.replace(m[0], `[文件: ${fileName}]`);
+      }
+    }
+
     // Send full text — no truncation
     const notification = [
       `${label}：`,
@@ -220,7 +234,12 @@ export class RemoteMonitor {
       `💬 用 #${slot} 你的消息 快速回复`,
     ].join('\n');
 
-    this.sendFn!(chatId, notification, imagePaths.length > 0 ? imagePaths : undefined).catch((err) => {
+    this.sendFn!(
+      chatId,
+      notification,
+      imagePaths.length > 0 ? imagePaths : undefined,
+      filePaths.length > 0 ? filePaths : undefined,
+    ).catch((err) => {
       console.error('[remote-monitor] send error:', err instanceof Error ? err.message : err);
     });
   }
