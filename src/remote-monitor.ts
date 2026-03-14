@@ -93,6 +93,8 @@ export class RemoteMonitor {
   private watchers = new Map<string, WatchEntry>();
   /** chatId → mode ('final' or 'stream') */
   private enabledChats = new Map<string, ChatMode>();
+  /** threadIds currently being handled by the bridge — suppress monitor notifications for these */
+  private suppressedThreadIds = new Set<string>();
   private sendFn: SendFn | null = null;
   private pollTimer: NodeJS.Timeout | null = null;
   private lastRefresh = 0;
@@ -134,6 +136,18 @@ export class RemoteMonitor {
     return this.enabledChats.has(chatId);
   }
 
+  /**
+   * Suppress notifications for a threadId while the bridge is actively handling it.
+   * Call before sendToThread; call unsuppress() in finally.
+   */
+  suppress(threadId: string): void {
+    this.suppressedThreadIds.add(threadId);
+  }
+
+  unsuppress(threadId: string): void {
+    this.suppressedThreadIds.delete(threadId);
+  }
+
   private ensurePolling(): void {
     if (this.pollTimer) return;
     this.pollTimer = setInterval(() => this.poll(), POLL_INTERVAL_MS);
@@ -173,17 +187,19 @@ export class RemoteMonitor {
   }
 
   private notify(chatId: string, threadId: string, slotMap: Map<string, { slot: string; workspaceName: string }>, text: string, tokens: number, isStream: boolean): void {
+    // Skip if the bridge is currently handling this thread (avoid duplicate delivery)
+    if (this.suppressedThreadIds.has(threadId)) return;
+
     const info = slotMap.get(threadId);
     const slot = info?.slot ?? '?';
     const ws = info?.workspaceName ?? threadId.slice(0, 8);
     const tokenNote = tokens > 0 ? `（${tokens} tokens）` : '';
     const label = isStream ? `💭 [${ws}] #${slot} 过程` : `📩 [${ws}] #${slot} 回复${tokenNote}`;
-    const preview = text.length > 300 ? `${text.slice(0, 297)}…` : text;
-
+    // Send full text — no truncation
     const notification = [
       `${label}：`,
       '',
-      preview,
+      text,
       '',
       `💬 用 #${slot} 你的消息 快速回复`,
     ].join('\n');

@@ -248,8 +248,14 @@ export class BridgeRouter {
       return `找不到目标：${route.targetToken}\n请先 /list 查看可用目标。`;
     }
 
-    const reply = await this.deps.codexRuntime.sendToThread(target, route.message, onProgress);
-    return [`临时发送到 ${target.slot} (${target.workspaceName})`, '', reply].join('\n');
+    const monitor = this.deps.remoteMonitor;
+    monitor?.suppress(target.threadId);
+    try {
+      const reply = await this.deps.codexRuntime.sendToThread(target, route.message, onProgress);
+      return [`临时发送到 ${target.slot} (${target.workspaceName})`, '', reply].join('\n');
+    } finally {
+      monitor?.unsuppress(target.threadId);
+    }
   }
 
   private async sendDefault(chatId: string, message: string, onProgress?: import('./types.js').ProgressCallback): Promise<string> {
@@ -271,7 +277,13 @@ export class BridgeRouter {
       return '当前默认目标已失效，请重新 /list 并 /go。';
     }
 
-    return this.deps.codexRuntime.sendToThread(target, message, onProgress);
+    const monitor = this.deps.remoteMonitor;
+    monitor?.suppress(target.threadId);
+    try {
+      return await this.deps.codexRuntime.sendToThread(target, message, onProgress);
+    } finally {
+      monitor?.unsuppress(target.threadId);
+    }
   }
 
   async handleText(chatId: string, text: string, onProgress?: import('./types.js').ProgressCallback): Promise<string> {

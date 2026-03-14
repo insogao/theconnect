@@ -1,4 +1,9 @@
 import * as lark from '@larksuiteoapi/node-sdk';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { loadConfig } from './config.js';
 import type { BridgeConfig } from './types.js';
 
@@ -43,14 +48,60 @@ export function extractFeishuText(messageType: string, contentJson: string): str
     } catch {
       raw = '';
     }
-  } else if (messageType === 'image' || messageType === 'file' || messageType === 'sticker') {
-    // For standalone image/file messages, return a placeholder so the handler processes them.
-    // The text extracted here will only be used if there's no #slot prefix — in that case
-    // the bot will reply with a helpful message rather than silently ignoring.
-    raw = '(图片)';
+  } else if (messageType === 'sticker') {
+    raw = '(表情包)';
+  } else if (messageType === 'image' || messageType === 'file') {
+    // Handled via downloadMessageMedia in the event handler; return empty here.
+    raw = '';
   }
 
   return raw.replace(/^(@\S+\s*)+/, '').trim();
+}
+
+/**
+ * Download an image or file from Feishu and save to a temp file.
+ * Returns the list of temp file paths (empty on failure).
+ */
+async function downloadMessageMedia(
+  client: lark.Client,
+  messageType: string,
+  contentJson: string,
+): Promise<Array<{ tmpPath: string; displayName: string }>> {
+  const results: Array<{ tmpPath: string; displayName: string }> = [];
+  try {
+    const content = JSON.parse(contentJson || '{}') as Record<string, unknown>;
+
+    if (messageType === 'image') {
+      const imageKey = content.image_key as string | undefined;
+      if (imageKey) {
+        const tmpPath = path.join(os.tmpdir(), `feishu_img_${Date.now()}.jpg`);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const resp = await (client.im.image as any).get({ path: { image_key: imageKey } });
+        const stream: unknown = (resp as Record<string, unknown>).data ?? resp;
+        if (stream instanceof Readable || (stream && typeof (stream as { pipe?: unknown }).pipe === 'function')) {
+          await pipeline(stream as Readable, fs.createWriteStream(tmpPath));
+          results.push({ tmpPath, displayName: path.basename(tmpPath) });
+        }
+      }
+    } else if (messageType === 'file') {
+      const fileKey = content.file_key as string | undefined;
+      const fileName = (content.file_name as string | undefined) ?? 'file';
+      if (fileKey) {
+        const ext = path.extname(fileName) || '';
+        const tmpPath = path.join(os.tmpdir(), `feishu_file_${Date.now()}${ext}`);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const resp = await (client.im.file as any).get({ path: { file_key: fileKey } });
+        const stream: unknown = (resp as Record<string, unknown>).data ?? resp;
+        if (stream instanceof Readable || (stream && typeof (stream as { pipe?: unknown }).pipe === 'function')) {
+          await pipeline(stream as Readable, fs.createWriteStream(tmpPath));
+          results.push({ tmpPath, displayName: fileName });
+        }
+      }
+    }
+  } catch {
+    // Ignore download errors; caller will fall back to placeholder text
+  }
+  return results;
 }
 
 export async function startFeishuBridge(
@@ -103,7 +154,20 @@ export async function startFeishuBridge(
           data: { reaction_type: { emoji_type: 'Typing' } },
         }).catch(() => undefined);
 
-        const text = extractFeishuText(message.message_type, message.content ?? '');
+        // Download media files for image/file messages; build descriptor text
+        let mediaPaths: Array<{ tmpPath: string; displayName: string }> = [];
+        let text: string;
+        if (message.message_type === 'image' || message.message_type === 'file') {
+          mediaPaths = await downloadMessageMedia(client, message.message_type, message.content ?? '').catch(() => []);
+          if (mediaPaths.length > 0) {
+            const list = mediaPaths.map(m => `  - ${m.displayName}: ${m.tmpPath}`).join('\n');
+            text = `[收到${message.message_type === 'file' ? '文件' : '图片'}，已下载到本地供 Codex 使用：\n${list}\n]`;
+          } else {
+            text = message.message_type === 'file' ? '(文件)' : '(图片)';
+          }
+        } else {
+          text = extractFeishuText(message.message_type, message.content ?? '');
+        }
         if (!text) return;
 
         const chatId = message.chat_type === 'p2p'
@@ -139,6 +203,11 @@ export async function startFeishuBridge(
           clearInterval(statusTimer);
           const msg = err instanceof Error ? err.message : String(err);
           await sendReply(message.message_id, `❌ 出错了：${msg}`);
+        } finally {
+          // Clean up any downloaded temp files
+          for (const { tmpPath } of mediaPaths) {
+            fs.unlink(tmpPath, () => undefined);
+          }
         }
       },
     }),
