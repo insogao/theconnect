@@ -72,6 +72,7 @@ export class BridgeRouter {
       '/改名 小高 - 给当前目标起别名',
       '/new [path] - 在指定目录新建会话',
       '/remote - 开启/关闭远程监控（桌面端 Codex 回复自动推送）',
+      '/remote stream - 流式模式，含过程消息',
       '/远程 - 开启/关闭远程监控',
       '/help - 显示帮助',
       '/帮助 - 显示帮助',
@@ -199,19 +200,23 @@ export class BridgeRouter {
     return `已将 ${target.slot} 设置别名为 #${cleanAlias}`;
   }
 
-  private remoteText(chatId: string): string {
+  private remoteText(chatId: string, raw: string): string {
     const monitor = this.deps.remoteMonitor;
     if (!monitor) return '远程监控功能未启用（remoteMonitor 未注入）。';
-    const enabled = monitor.toggle(chatId);
+    const wantStream = /stream|流式|详细/i.test(raw);
+    const mode = wantStream ? 'stream' : 'final';
+    const enabled = monitor.toggle(chatId, mode);
     if (enabled) {
+      const modeLabel = mode === 'stream' ? '流式（含过程）' : '默认（仅最终回复）';
       return [
-        '✅ 远程监控已开启',
+        `✅ 远程监控已开启 — ${modeLabel}`,
         '',
         '当 Codex 桌面端的任意 session 有新 AI 回复时，会自动推送到此对话。',
-        '格式：📩 来自 [workspace] 的 #编号 线程有新回复',
-        '然后可用 #编号 你的消息 快速回复。',
+        mode === 'stream'
+          ? '💭 过程消息（phase=commentary）和 📩 最终回复都会发送。'
+          : '📩 只发送最终回复（phase=final_answer），过滤掉中间思考步骤。',
         '',
-        '再次发送 /remote 可关闭。',
+        '再次发送 /remote 可关闭；发送 /remote stream 可切换到流式模式。',
       ].join('\n');
     } else {
       return '🔕 远程监控已关闭。';
@@ -293,8 +298,8 @@ export class BridgeRouter {
     if (trimmed === '/new' || trimmed.startsWith('/new ')) {
       return this.newText(chatId, trimmed.slice('/new'.length));
     }
-    if (trimmed === '/remote' || trimmed === '/远程') {
-      return this.remoteText(chatId);
+    if (trimmed === '/remote' || trimmed === '/远程' || trimmed.startsWith('/remote ') || trimmed.startsWith('/远程 ')) {
+      return this.remoteText(chatId, trimmed);
     }
 
     const tempRoute = parseTemporaryRoute(trimmed);
