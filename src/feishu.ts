@@ -2,8 +2,6 @@ import * as lark from '@larksuiteoapi/node-sdk';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { Readable } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
 import { loadConfig } from './config.js';
 import type { BridgeConfig } from './types.js';
 
@@ -61,27 +59,29 @@ export function extractFeishuText(messageType: string, contentJson: string): str
 /**
  * Download an image or file from Feishu and save to a temp file.
  * Returns the list of temp file paths (empty on failure).
+ * messageId is required for images/files embedded in messages (post/image/file types).
  */
 async function downloadMessageMedia(
   client: lark.Client,
   messageType: string,
   contentJson: string,
+  messageId: string,
 ): Promise<Array<{ tmpPath: string; displayName: string }>> {
   const results: Array<{ tmpPath: string; displayName: string }> = [];
   try {
     const content = JSON.parse(contentJson || '{}') as Record<string, unknown>;
 
     if (messageType === 'image') {
-      const imageKey = content.image_key as string | undefined;
-      if (imageKey) {
+      const fileKey = content.image_key as string | undefined;
+      if (fileKey) {
         const tmpPath = path.join(os.tmpdir(), `feishu_img_${Date.now()}.jpg`);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const resp = await (client.im.image as any).get({ path: { image_key: imageKey } });
-        const stream: unknown = (resp as Record<string, unknown>).data ?? resp;
-        if (stream instanceof Readable || (stream && typeof (stream as { pipe?: unknown }).pipe === 'function')) {
-          await pipeline(stream as Readable, fs.createWriteStream(tmpPath));
-          results.push({ tmpPath, displayName: path.basename(tmpPath) });
-        }
+        const resp = await (client.im.messageResource as any).get({
+          params: { type: 'image' },
+          path: { message_id: messageId, file_key: fileKey },
+        });
+        await resp.writeFile(tmpPath);
+        results.push({ tmpPath, displayName: path.basename(tmpPath) });
       }
     } else if (messageType === 'file') {
       const fileKey = content.file_key as string | undefined;
@@ -90,41 +90,43 @@ async function downloadMessageMedia(
         const ext = path.extname(fileName) || '';
         const tmpPath = path.join(os.tmpdir(), `feishu_file_${Date.now()}${ext}`);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const resp = await (client.im.file as any).get({ path: { file_key: fileKey } });
-        const stream: unknown = (resp as Record<string, unknown>).data ?? resp;
-        if (stream instanceof Readable || (stream && typeof (stream as { pipe?: unknown }).pipe === 'function')) {
-          await pipeline(stream as Readable, fs.createWriteStream(tmpPath));
-          results.push({ tmpPath, displayName: fileName });
-        }
+        const resp = await (client.im.messageResource as any).get({
+          params: { type: 'file' },
+          path: { message_id: messageId, file_key: fileKey },
+        });
+        await resp.writeFile(tmpPath);
+        results.push({ tmpPath, displayName: fileName });
       }
     } else if (messageType === 'post') {
       // Extract img blocks from all languages in the post
-      type PostBlock = { tag: string; image_key?: string };
+      type PostBlock = { tag: string; image_key?: string; file_key?: string };
       type PostLang = { content?: PostBlock[][] };
       const postContent = content as Record<string, PostLang>;
       const lang = postContent.zh_cn ?? postContent.en_us ?? Object.values(postContent)[0];
+      console.log('[feishu] post raw blocks:', JSON.stringify(lang?.content?.slice(0,3)));
       let imgIndex = 0;
       for (const line of lang?.content ?? []) {
         for (const block of line) {
-          if (block.tag === 'img' && block.image_key) {
+          const fileKey = block.image_key ?? block.file_key;
+          if (block.tag === 'img' && fileKey) {
             const tmpPath = path.join(os.tmpdir(), `feishu_post_img_${Date.now()}_${imgIndex++}.jpg`);
             try {
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const resp = await (client.im.image as any).get({ path: { image_key: block.image_key } });
-              const stream: unknown = (resp as Record<string, unknown>).data ?? resp;
-              if (stream instanceof Readable || (stream && typeof (stream as { pipe?: unknown }).pipe === 'function')) {
-                await pipeline(stream as Readable, fs.createWriteStream(tmpPath));
-                results.push({ tmpPath, displayName: path.basename(tmpPath) });
-              }
+              const resp = await (client.im.messageResource as any).get({
+                params: { type: 'image' },
+                path: { message_id: messageId, file_key: fileKey },
+              });
+              await resp.writeFile(tmpPath);
+              results.push({ tmpPath, displayName: path.basename(tmpPath) });
             } catch (e) {
-              console.error('[feishu] Failed to download post image', block.image_key, e instanceof Error ? e.message : e);
+              console.error('[feishu] Failed to download post image', fileKey, e instanceof Error ? e.message : e);
             }
           }
         }
       }
     }
-  } catch {
-    // Ignore download errors; caller will fall back to placeholder text
+  } catch (e) {
+    console.error('[feishu] downloadMessageMedia error:', e instanceof Error ? e.message : e);
   }
   return results;
 }
@@ -187,7 +189,7 @@ export async function startFeishuBridge(
         console.log(`[feishu] recv msg_type=${message.message_type} msg_id=${message.message_id}`);
 
         if (message.message_type === 'image' || message.message_type === 'file') {
-          mediaPaths = await downloadMessageMedia(client, message.message_type, message.content ?? '').catch((e) => {
+          mediaPaths = await downloadMessageMedia(client, message.message_type, message.content ?? '', message.message_id).catch((e) => {
             console.error('[feishu] downloadMessageMedia error:', e instanceof Error ? e.message : e);
             return [];
           });
@@ -202,7 +204,7 @@ export async function startFeishuBridge(
         } else if (message.message_type === 'post') {
           // post = rich text: may contain text blocks AND img blocks
           text = extractFeishuText('post', message.content ?? '');
-          const postImgs = await downloadMessageMedia(client, 'post', message.content ?? '').catch((e) => {
+          const postImgs = await downloadMessageMedia(client, 'post', message.content ?? '', message.message_id).catch((e) => {
             console.error('[feishu] post image download error:', e instanceof Error ? e.message : e);
             return [];
           });
