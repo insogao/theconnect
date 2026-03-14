@@ -140,6 +140,7 @@ await test('formatRelativeTime 输出中文相对时间', async () => {
 await test('listTargetsFromDb 会过滤掉工作目录不存在的线程', async () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-db-'));
   const dbPath = path.join(tmpRoot, 'state.sqlite');
+  const sessionIndexPath = path.join(tmpRoot, 'session_index.jsonl');
   const liveCwd = path.join(tmpRoot, 'live-workspace');
   const deadCwd = path.join(tmpRoot, 'missing-workspace');
   fs.mkdirSync(liveCwd, { recursive: true });
@@ -193,9 +194,13 @@ await test('listTargetsFromDb 会过滤掉工作目录不存在的线程', async
   insert.run('thread-dead', deadRollout, 1, 2, deadCwd, 'Dead title', 'Dead first');
   db.close();
 
-  const targetsFromDb = listTargetsFromDb(dbPath);
+  fs.writeFileSync(sessionIndexPath, `${JSON.stringify({ id: 'thread-live', thread_name: 'Desktop Live Title', updated_at: '2026-03-14T10:26:20.000Z' })}\n`);
+
+  const targetsFromDb = listTargetsFromDb(dbPath, sessionIndexPath);
   assert.equal(targetsFromDb.length, 1);
   assert.equal(targetsFromDb[0].workspaceName, 'live-workspace');
+  assert.equal(targetsFromDb[0].title, 'Desktop Live Title');
+  assert.equal(targetsFromDb[0].updatedAt, Math.floor(Date.parse('2026-03-14T10:26:20.000Z') / 1000));
 });
 
 console.log(`\n单元测试完成：${passed} 项通过`);
