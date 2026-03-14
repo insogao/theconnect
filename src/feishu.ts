@@ -31,14 +31,22 @@ export function extractFeishuText(messageType: string, contentJson: string): str
   } else if (messageType === 'post') {
     try {
       type PostBlock = { tag: string; text?: string; user_name?: string };
-      type PostLang = { content?: PostBlock[][] };
-      const content = JSON.parse(contentJson) as Record<string, PostLang>;
-      const lang = content.zh_cn ?? content.en_us ?? Object.values(content)[0];
+      type PostLang = { title?: string; content?: PostBlock[][] };
+      const parsed = JSON.parse(contentJson) as Record<string, unknown>;
+      // Feishu post can be either:
+      //   direct: { title, content: [[...]] }
+      //   language-keyed: { zh_cn: { title, content: [[...]] }, en_us: {...} }
+      let lang: PostLang | undefined;
+      if (Array.isArray(parsed.content)) {
+        lang = parsed as PostLang;
+      } else {
+        const keyed = parsed as Record<string, PostLang>;
+        lang = keyed.zh_cn ?? keyed.en_us ?? (Object.values(keyed).find(v => v && typeof v === 'object' && Array.isArray((v as PostLang).content)) as PostLang | undefined);
+      }
       const pieces: string[] = [];
       for (const line of lang?.content ?? []) {
         for (const block of line) {
           if (block.tag === 'text' && block.text) pieces.push(block.text);
-          // 'a' = link element — grab link text too
           else if (block.tag === 'a' && block.text) pieces.push(block.text);
         }
       }
@@ -99,11 +107,20 @@ async function downloadMessageMedia(
       }
     } else if (messageType === 'post') {
       // Extract img blocks from all languages in the post
+      // Extract img blocks — supports both direct {title,content} and language-keyed {zh_cn:{content}} formats
       type PostBlock = { tag: string; image_key?: string; file_key?: string };
-      type PostLang = { content?: PostBlock[][] };
-      const postContent = content as Record<string, PostLang>;
-      const lang = postContent.zh_cn ?? postContent.en_us ?? Object.values(postContent)[0];
-      console.log('[feishu] post raw blocks:', JSON.stringify(lang?.content?.slice(0,3)));
+      type PostLang = { title?: string; content?: PostBlock[][] };
+      let lang: PostLang | undefined;
+      if (Array.isArray(content.content)) {
+        // Direct format: { title, content: [[...]] }
+        lang = content as unknown as PostLang;
+      } else {
+        // Language-keyed format: { zh_cn: { content: [[...]] } }
+        const keyed = content as Record<string, PostLang>;
+        lang = keyed.zh_cn ?? keyed.en_us
+          ?? (Object.values(keyed).find(v => v && typeof v === 'object' && Array.isArray((v as PostLang).content)) as PostLang | undefined);
+      }
+      console.log('[feishu] post img blocks:', JSON.stringify(lang?.content?.flat().filter(b => (b as PostBlock).tag === 'img')));
       let imgIndex = 0;
       for (const line of lang?.content ?? []) {
         for (const block of line) {
@@ -202,7 +219,6 @@ export async function startFeishuBridge(
             text = message.message_type === 'file' ? '(文件下载失败)' : '(图片下载失败)';
           }
         } else if (message.message_type === 'post') {
-          // post = rich text: may contain text blocks AND img blocks
           text = extractFeishuText('post', message.content ?? '');
           const postImgs = await downloadMessageMedia(client, 'post', message.content ?? '', message.message_id).catch((e) => {
             console.error('[feishu] post image download error:', e instanceof Error ? e.message : e);
