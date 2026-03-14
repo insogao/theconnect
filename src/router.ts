@@ -95,10 +95,28 @@ export class BridgeRouter {
       return '当前没有发现任何目标。请先在本地使用 Codex 创建线程。';
     }
 
-    const lines = ['全部目标'];
+    // Group targets by workspaceName, preserving order of first appearance
+    const workspaceOrder: string[] = [];
+    const workspaceMap = new Map<string, Target[]>();
     for (const target of targets) {
-      const currentMark = state.currentTargetSlot === target.slot ? '（当前）' : '';
-      lines.push(`${formatTargetLine(target, state)} ${currentMark}`.trim());
+      if (!workspaceMap.has(target.workspaceName)) {
+        workspaceOrder.push(target.workspaceName);
+        workspaceMap.set(target.workspaceName, []);
+      }
+      workspaceMap.get(target.workspaceName)!.push(target);
+    }
+
+    const lines = ['全部目标'];
+    for (const wsName of workspaceOrder) {
+      const group = workspaceMap.get(wsName)!;
+      const wsPath = group[0].workingDirectory;
+      lines.push('');
+      lines.push(`[工作区] ${wsName}`);
+      lines.push(`路径：${wsPath}`);
+      for (const target of group) {
+        const currentMark = state.currentTargetSlot === target.slot ? '【当前】' : '';
+        lines.push(`${formatTargetLine(target, state)} ${currentMark}`.trim());
+      }
     }
     lines.push('');
     lines.push('可执行：/go 编号，或者直接发送 #编号 你的问题');

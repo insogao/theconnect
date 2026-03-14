@@ -71,9 +71,12 @@ await test('/help 显示 slash 命令并推荐 4test', async () => {
   assert.match(result, /\/go 101/);
 });
 
-await test('/list 返回目标列表', async () => {
+await test('/list 按 workspace 分组，含路径和编号', async () => {
   const result = await router.handleText(chatId, '/list');
+  assert.match(result, /\[工作区\] 4test/);
+  assert.match(result, /路径：/);
   assert.match(result, /101 - \[4test\]/);
+  assert.match(result, /\[工作区\] alpha/);
   assert.match(result, /102 - \[alpha\]/);
   assert.match(result, /更新时间：/);
 });
