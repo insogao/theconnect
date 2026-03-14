@@ -287,17 +287,55 @@ export async function startFeishuBridge(
    * Send a proactive message to any Feishu chat (used by RemoteMonitor notifications).
    * Detects receive_id_type from the chatId prefix:
    *   ou_ → open_id (DM)   oc_ → chat_id (group)
+   * If imagePaths are provided, each local file is uploaded to Feishu and sent
+   * as an image message before the text message.
    */
-  const sendToChat = async (chatId: string, text: string): Promise<void> => {
+  const sendToChat = async (chatId: string, text: string, imagePaths?: string[]): Promise<void> => {
     const receiveIdType = chatId.startsWith('oc_') ? 'chat_id' : 'open_id';
-    await client.im.message.create({
-      params: { receive_id_type: receiveIdType },
-      data: {
-        receive_id: chatId,
-        msg_type: 'text',
-        content: JSON.stringify({ text }),
-      },
-    });
+
+    // Upload and send each local image
+    if (imagePaths?.length) {
+      for (const imgPath of imagePaths) {
+        try {
+          if (!fs.existsSync(imgPath)) continue;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const uploadResp = await (client.im.image as any).create({
+            data: {
+              image_type: 'message',
+              image: fs.createReadStream(imgPath),
+            },
+          });
+          const imageKey = uploadResp?.data?.image_key as string | undefined;
+          if (!imageKey) {
+            console.warn('[feishu] sendToChat: image upload returned no image_key for', imgPath);
+            continue;
+          }
+          await client.im.message.create({
+            params: { receive_id_type: receiveIdType },
+            data: {
+              receive_id: chatId,
+              msg_type: 'image',
+              content: JSON.stringify({ image_key: imageKey }),
+            },
+          });
+          console.log('[feishu] sendToChat: sent image', path.basename(imgPath), 'as', imageKey);
+        } catch (err) {
+          console.error('[feishu] sendToChat image upload error:', err instanceof Error ? err.message : err);
+        }
+      }
+    }
+
+    // Send text message (only if there is content)
+    if (text.trim()) {
+      await client.im.message.create({
+        params: { receive_id_type: receiveIdType },
+        data: {
+          receive_id: chatId,
+          msg_type: 'text',
+          content: JSON.stringify({ text }),
+        },
+      });
+    }
   };
 
   console.log('[feishu] Bot connected. Waiting for messages...');

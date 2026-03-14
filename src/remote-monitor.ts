@@ -19,11 +19,14 @@ import os from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import type { Target } from './types.js';
 
+/** Regex to detect markdown image references: ![alt](localpath) */
+const LOCAL_IMG_RE = /!\[[^\]]*\]\((\/?(?:\/[^)]+|[A-Za-z]:[^)]+))\)/g;
+
 const CODEX_DB_PATH = path.join(os.homedir(), '.codex', 'state_5.sqlite');
 const POLL_INTERVAL_MS = 2500;
 const REFRESH_TARGETS_EVERY_MS = 30_000;
 
-type SendFn = (chatId: string, text: string) => Promise<void>;
+type SendFn = (chatId: string, text: string, imagePaths?: string[]) => Promise<void>;
 type GetTargets = () => Target[];
 
 type ChatMode = 'final' | 'stream';
@@ -195,16 +198,29 @@ export class RemoteMonitor {
     const ws = info?.workspaceName ?? threadId.slice(0, 8);
     const tokenNote = tokens > 0 ? `（${tokens} tokens）` : '';
     const label = isStream ? `💭 [${ws}] #${slot} 过程` : `📩 [${ws}] #${slot} 回复${tokenNote}`;
+
+    // Extract local image paths from markdown ![alt](path) syntax
+    const imagePaths: string[] = [];
+    let cleanText = text;
+    LOCAL_IMG_RE.lastIndex = 0;
+    for (const m of [...text.matchAll(LOCAL_IMG_RE)]) {
+      const imgPath = m[1];
+      if (fs.existsSync(imgPath)) {
+        imagePaths.push(imgPath);
+        cleanText = cleanText.replace(m[0], '[图片]');
+      }
+    }
+
     // Send full text — no truncation
     const notification = [
       `${label}：`,
       '',
-      text,
+      cleanText,
       '',
       `💬 用 #${slot} 你的消息 快速回复`,
     ].join('\n');
 
-    this.sendFn!(chatId, notification).catch((err) => {
+    this.sendFn!(chatId, notification, imagePaths.length > 0 ? imagePaths : undefined).catch((err) => {
       console.error('[remote-monitor] send error:', err instanceof Error ? err.message : err);
     });
   }
